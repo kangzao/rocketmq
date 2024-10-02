@@ -180,12 +180,16 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
             && Epoll.isAvailable();
     }
 
+    /**
+     * 启动基于 Netty 的网络服务器，用于处理来自客户端的连接和请求。
+     */
     @Override
     public void start() {
+        //DefaultEventExecutorGroup 是基于 Netty 框架中的 EventExecutorGroup 接口实现的一个类，它的作用是为处理网络事件提供一组线程
         this.defaultEventExecutorGroup = new DefaultEventExecutorGroup(
             nettyServerConfig.getServerWorkerThreads(),
             new ThreadFactory() {
-
+                // 使用 AtomicInteger 来生成线程索引，确保线程名称唯一
                 private AtomicInteger threadIndex = new AtomicInteger(0);
 
                 @Override
@@ -193,14 +197,23 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                     return new Thread(r, "NettyServerCodecThread_" + this.threadIndex.incrementAndGet());
                 }
             });
-
+        // 准备可共享的处理器，这些处理器会被添加到 Channel 的 pipeline 中。
         prepareSharableHandlers();
 
         ServerBootstrap childHandler =
             this.serverBootstrap.group(this.eventLoopGroupBoss, this.eventLoopGroupSelector)
+                // 根据系统类型选择使用 Epoll 还是 Nio 作为 Channel 的实现。
                 .channel(useEpoll() ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
+                // 当客户端尝试连接服务器时，服务器会为每个连接请求创建一个 SocketChannel。如果服务器的事件循环（EventLoop）暂时无法立即处理新的连接请求（可能是因为它正在处理其他 I/O 操作），
+                // 那么新的连接请求会被放入一个等待队列中。SO_BACKLOG 就是用来设置这个等待队列的最大长度的。
+                // 在Netty框架中，SO_BACKLOG 的默认值是通过 NetUtil.SOMAXCONN 指定的，这通常与操作系统的 somaxconn 参数相对应。如果配置文件 /proc/sys/net/core/somaxconn 存在，Netty会读取配置文件中的值，并将 SO_BACKLOG 的值设置为配置文件中指定的值。
+                // 该内核参数默认值一般是128，对于负载很大的服务程序来说大大的不够。一般会将它修改为2048或者更大。
                 .option(ChannelOption.SO_BACKLOG, nettyServerConfig.getServerSocketBacklog())
+                // 允许立即重用本地地址和端口：通常情况下，当一个 TCP 连接关闭后，连接会进入 TIME_WAIT 状态，持续约 2 分钟，以确保所有网络上的重复包都消失。在此期间，
+                // 无法立即在同一端口上启动一个新的监听服务。设置 SO_REUSEADDR 选项允许服务器立即重启并绑定到先前使用的端口，即使该端口仍处于 TIME_WAIT 状态
                 .option(ChannelOption.SO_REUSEADDR, true)
+                // SO_KEEPALIVE 是一个套接字选项，用于在 TCP 连接中启用保活机制。当启用此选项时，如果在一定时间内没有任何数据传输，TCP 将自动发送保活探测包（keepalive probes）以检查连接的另一端是否仍然活跃。
+                // 如果在一定次数内没有收到响应，TCP 将终止连接
                 .option(ChannelOption.SO_KEEPALIVE, false)
                 .childOption(ChannelOption.TCP_NODELAY, true)
                 .localAddress(new InetSocketAddress(this.nettyServerConfig.getListenPort()))
@@ -208,7 +221,11 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                     @Override
                     public void initChannel(SocketChannel ch) throws Exception {
                         ch.pipeline()
+                            //如果你传递 null 作为这个参数，那么处理器将会被添加到与调用 ChannelPipeline 所在线程相同的 EventLoop（事件循环）中。这意味着处理器的事件将由当前线程处理，这通常用于简化异步处理。
+                            //如果你传递一个非 null 的 EventExecutorGroup 实例，那么处理器的事件将由该组中的某个线程处理。这允许你在不同的线程组之间分配处理任务，以实现更灵活的并发控制。
                             .addLast(defaultEventExecutorGroup, HANDSHAKE_HANDLER_NAME, handshakeHandler)
+                            //这些处理器都被添加到同一个线程组中，并且它们的事件将由该组中的线程来处理。
+                            //这样可以确保这些处理器的事件处理逻辑在同一个线程上下文中执行，这对于需要保证处理顺序或共享线程局部变量的处理器来说非常有用。
                             .addLast(defaultEventExecutorGroup,
                                 encoder,
                                 new NettyDecoder(),
@@ -220,10 +237,12 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                 });
         if (nettyServerConfig.getServerSocketSndBufSize() > 0) {
             log.info("server set SO_SNDBUF to {}", nettyServerConfig.getServerSocketSndBufSize());
+            // ChannelOption.SO_SNDBUF 是 Netty 中用于设置 TCP 套接字发送缓冲区大小的配置选项。发送缓冲区是操作系统用来暂存应用程序发送的数据的区域，待网络设备将其发送到网络上
             childHandler.childOption(ChannelOption.SO_SNDBUF, nettyServerConfig.getServerSocketSndBufSize());
         }
         if (nettyServerConfig.getServerSocketRcvBufSize() > 0) {
             log.info("server set SO_RCVBUF to {}", nettyServerConfig.getServerSocketRcvBufSize());
+            //ChannelOption.SO_RCVBUF 是 Netty 中用于设置 TCP 套接字接收缓冲区大小的配置选项。接收缓冲区是操作系统内核用来暂存从网络接收的数据的区域，直到应用程序读取这些数据。
             childHandler.childOption(ChannelOption.SO_RCVBUF, nettyServerConfig.getServerSocketRcvBufSize());
         }
         if (nettyServerConfig.getWriteBufferLowWaterMark() > 0 && nettyServerConfig.getWriteBufferHighWaterMark() > 0) {
@@ -234,21 +253,24 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         }
 
         if (nettyServerConfig.isServerPooledByteBufAllocatorEnable()) {
+//            ChannelOption.ALLOCATOR 是Netty中用于设置ByteBuf分配器的配置选项
+//            PooledByteBufAllocator：这是一个池化的分配器，它使用一个预分配的内存池来分配ByteBuf，这有助于减少内存分配和垃圾收集的开销。在Netty 4.1及以后的版本中，这是默认的分配器
             childHandler.childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT);
         }
 
         try {
+            // 绑定服务器到配置的端口并等待绑定操作完成。
             ChannelFuture sync = this.serverBootstrap.bind().sync();
             InetSocketAddress addr = (InetSocketAddress) sync.channel().localAddress();
             this.port = addr.getPort();
         } catch (InterruptedException e1) {
             throw new RuntimeException("this.serverBootstrap.bind().sync() InterruptedException", e1);
         }
-
+           // 如果设置了通道事件监听器，启动相关的事件执行器。
         if (this.channelEventListener != null) {
             this.nettyEventExecutor.start();
         }
-
+          // 定时扫描响应表，以处理超时或空闲的连接。
         this.timer.scheduleAtFixedRate(new TimerTask() {
 
             @Override

@@ -26,17 +26,31 @@ import org.apache.commons.cli.ParseException;
 
 public class ServerUtil {
 
+    /**
+     * 构建命令行选项
+     * 该方法用于创建并返回一个配置了特定命令行选项的Options对象
+     *
+     * @param options 输入的Option对象，用于存储命令行选项
+     * @return 配置了命令行选项的Options对象
+     */
     public static Options buildCommandlineOptions(final Options options) {
+        // 创建一个命令行选项，用于表示帮助信息
         Option opt = new Option("h", "help", false, "Print help");
+        // 设置该选项是否为必选项
         opt.setRequired(false);
+        // 将该选项添加到Options对象中
         options.addOption(opt);
 
+        // 创建一个命令行选项，用于指定名称服务器地址列表
         opt =
             new Option("n", "namesrvAddr", true,
                 "Name server address list, eg: '192.168.0.1:9876;192.168.0.2:9876'");
+        // 设置该选项是否为必选项
         opt.setRequired(false);
+        // 将该选项添加到Options对象中
         options.addOption(opt);
 
+        // 返回配置了命令行选项的Options对象
         return options;
     }
 

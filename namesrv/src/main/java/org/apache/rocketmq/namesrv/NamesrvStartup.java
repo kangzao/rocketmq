@@ -69,6 +69,14 @@ public class NamesrvStartup {
         return null;
     }
 
+    /**
+     * 创建 NamesrvController 实例，该控制器负责管理 NameServer 的核心功能。
+     *
+     * @param args 命令行参数数组，可以包含用于配置 NameServer 的选项。
+     * @return 创建的 NamesrvController 实例，如果创建失败则返回 null。
+     * @throws IOException 如果配置文件加载失败，抛出 IOException。
+     * @throws JoranException 如果日志配置解析失败，抛出 JoranException。
+     */
     public static NamesrvController createNamesrvController(String[] args) throws IOException, JoranException {
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
         //PackageConflictDetect.detectFastjson();
@@ -79,10 +87,11 @@ public class NamesrvStartup {
             System.exit(-1);
             return null;
         }
-
+        ///创建 NamesrvController 的两大核心配置 NamesrvConfig 和 NettyServerConfig
         final NamesrvConfig namesrvConfig = new NamesrvConfig();
         final NettyServerConfig nettyServerConfig = new NettyServerConfig();
         nettyServerConfig.setListenPort(9876);
+        // -c 配置文件路径  -- 通过配置文件加载配置
         if (commandLine.hasOption('c')) {
             String file = commandLine.getOptionValue('c');
             if (file != null) {
@@ -98,7 +107,7 @@ public class NamesrvStartup {
                 in.close();
             }
         }
-
+        // -p 属性名=属性值 --直接指定属性值
         if (commandLine.hasOption('p')) {
             InternalLogger console = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_CONSOLE_NAME);
             MixAll.printObjectProperties(console, namesrvConfig);
@@ -106,6 +115,7 @@ public class NamesrvStartup {
             System.exit(0);
         }
 
+        //通过控制台指定属性值
         MixAll.properties2Object(ServerUtil.commandLine2Properties(commandLine), namesrvConfig);
 
         if (null == namesrvConfig.getRocketmqHome()) {
@@ -124,6 +134,7 @@ public class NamesrvStartup {
         MixAll.printObjectProperties(log, namesrvConfig);
         MixAll.printObjectProperties(log, nettyServerConfig);
 
+        //创建 NamesrvController
         final NamesrvController controller = new NamesrvController(namesrvConfig, nettyServerConfig);
 
         // remember all configs to prevent discard
